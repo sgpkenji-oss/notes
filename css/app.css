@@ -632,7 +632,20 @@ input, textarea { -webkit-user-select: text; user-select: text; font: inherit; }
 /* ================= 第4段階：付箋・コネクタ・グループ枠・ボードページ ================= */
 
 #toolbar button[hidden] { display: none; }
-#toolbar .sticky-swatch i { border-radius: 4px; }
+#toolbar .sticky-swatch i { border-radius: 4px; box-shadow: none; position: relative; }
+/* 選択中の付箋の色：青い輪とチェック印 */
+#toolbar .sticky-swatch.active i { box-shadow: 0 0 0 2px var(--bar-bg), 0 0 0 4px var(--accent); }
+#toolbar .sticky-swatch.active i::after {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 3px;
+  width: 6px;
+  height: 11px;
+  border: solid #2b2f36;
+  border-width: 0 2.5px 2.5px 0;
+  transform: rotate(45deg);
+}
 
 /* ページの追加メニューの「ボード」 */
 .paper-board i {

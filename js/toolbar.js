@@ -48,7 +48,7 @@ export class Toolbar {
     });
     // 付箋の道具のときは、付箋の色を出す
     this.stickyButtons = STICKY_COLORS.map((c) => {
-      const b = button('swatch sticky-swatch', `<i style="background:${c.fill};box-shadow:inset 0 0 0 1.5px ${c.edge}"></i>`, `${c.label}の付箋`);
+      const b = button('swatch sticky-swatch', `<i style="background:${c.fill};border:1.5px solid ${c.edge}"></i>`, `${c.label}の付箋`);
       b.dataset.key = c.key;
       b.hidden = true;
       b.addEventListener('click', () => tools.setColor(c.key));
