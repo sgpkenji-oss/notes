@@ -108,7 +108,14 @@ async function loadAppState() {
   return state;
 }
 
+// アプリの部品の受け渡し役（sw.js）。更新を次の起動で必ず反映し、オフラインでも起動できるようにする
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Service Worker を登録できませんでした', err));
+}
+
 async function boot() {
+  registerServiceWorker();
   setupInstallBanner(resize);
   requestPersistentStorage();
 
