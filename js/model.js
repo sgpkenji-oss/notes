@@ -39,21 +39,50 @@ export function createFolder({ name, parentId = null, order = 0 }) {
 
 // ノート。lastPageId と view で「前回の続き」を開く。
 // view = { offsetY: ページ上端から画面上端までの距離, x: 画面左端のページ座標, zoom: 画面幅に合わせた大きさを1とした拡大率 }
+// boardPageId は、ボードページを開いたまま閉じたときのそのページのID（次に開いたときにボードから始める）。
+// boardViews は、ボードページごとの表示位置 { [ページID]: { x, y, zoom } }（x, y は画面左上のボード座標）。
 export function createNote({ name, folderId = null }) {
-  return base({ name, folderId, tags: [], pinned: false, lastPageId: null, view: null, openedAt: now() });
+  return base({ name, folderId, tags: [], pinned: false, lastPageId: null, view: null, openedAt: now(), boardPageId: null, boardViews: {} });
 }
 
-// ページ。kind は 'note'（ノートページ）か 'board'（ボードページ、第4段階）。
+// ページ。kind は 'note'（ノートページ）か 'board'（ボードページ。上下左右に広がる）。
 // paper は 'plain' | 'ruled' | 'grid'（ボードページは null）。order は並び順（小数も可）。
 export function createPage({ noteId, paper = 'ruled', order = 1, kind = 'note' }) {
   return base({ noteId, kind, paper: kind === 'board' ? null : paper, order });
 }
 
 // 線。points は [x, y, 筆圧, x, y, 筆圧, ...] の平らな配列（ページ座標。筆圧は 0〜1）。
-// stickyId は付箋の中の線のとき付箋のID（第4段階。そのとき座標は付箋からの相対位置）。
+// stickyId は付箋の中の線のとき付箋のID（そのとき座標は付箋の左上からの相対位置）。
+// frameId はグループ枠の名前（上辺に手書き）の線のとき枠のID（そのとき座標は枠の左上からの相対位置）。
+// どちらも無い線（第3段階までの線）は、ページに直接書いた線。
 // tool は 'pen' | 'marker'、width は基準の太さ（ページ座標の単位）。
-export function createStroke({ pageId, stickyId = null, tool, color, width, points = [] }) {
-  return base({ pageId, stickyId, tool, color, width, points });
+export function createStroke({ pageId, stickyId = null, frameId = null, tool, color, width, points = [] }) {
+  return base({ pageId, stickyId, frameId, tool, color, width, points });
+}
+
+// ---- 付箋・コネクタ・グループ枠（第4段階） ----
+// 位置と大きさはページ座標（ボードページではボード座標。原点は最初に開いたときの左上）。
+
+export const STICKY_SIZE = 180;      // 新しい付箋の大きさ
+export const STICKY_MIN = 90;        // 付箋の最小の大きさ
+export const STICKY_BAND = 30;       // 付箋の上の帯（つまんで動かす所）の高さ
+export const FRAME_BAND = 64;        // 枠の上辺（名前を書く所）の高さ
+export const FRAME_MIN = 160;        // 枠の最小の大きさ
+export const FRAME_PAD = 28;         // 付箋を囲んで枠を作るときの余白
+
+// 付箋。color は色の名前（scene.js の STICKY_COLORS）。frameId は所属するグループ枠。z は重なりの順（大きいほど上）
+export function createSticky({ pageId, x, y, w = STICKY_SIZE, h = STICKY_SIZE, color = 'yellow', frameId = null, z = 0 }) {
+  return base({ pageId, x, y, w, h, color, frameId, z });
+}
+
+// コネクタ。fromId → toId の付箋をつなぐ。arrow は 'none' | 'end'（先だけ）| 'both'
+export function createConnector({ pageId, fromId, toId, arrow = 'end', color = '#4a5260' }) {
+  return base({ pageId, fromId, toId, arrow, color });
+}
+
+// グループ枠。名前は手書き（frameId を持つ線）。color は色の名前（scene.js の FRAME_COLORS）
+export function createFrame({ pageId, x, y, w, h, color = 'gray' }) {
+  return base({ pageId, x, y, w, h, color });
 }
 
 // アプリの状態（1件だけ。id は 'app' に固定）
@@ -63,7 +92,7 @@ export function createAppState(noteId) {
     id: 'app',
     createdAt: t,
     updatedAt: t,
-    schemaVersion: 3,
+    schemaVersion: 4,
     tabs: [noteId],
     tabUsedAt: { [noteId]: t },
     activeNoteId: noteId,

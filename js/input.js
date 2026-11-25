@@ -3,9 +3,16 @@
 // 手のひらで画面が動かないように、ペンが触れている間の指はすべて無視する。
 // パソコンで確かめるときのために、マウスで書く・ホイールで動かすこともできる。
 // 設定で「入力方式A（Pointer Events）」にすると、同じ処理を Pointer Events の入力で動かす（標準はB）。
+//
+// 第4段階：指で付箋の帯・枠の上辺などをつまんだときは、画面を動かす代わりにその物を動かす
+//   handlers.fingerStart(x, y) が true を返したら、その指は fingerMove / fingerEnd(cancelled) に渡す。
+//   ペンが触れたら、つまんでいた物は元に戻す（fingerEnd(true)）。
+//   指で軽くタップしたときは handlers.fingerTap(x, y) を呼ぶ（コネクタの切り替えなど）。
 const PALM_RADIUS = 45;        // これより大きく触れたものは手のひらとみなす（CSSピクセル）
 const REVERT_WINDOW_MS = 400;  // ペンの直前に始まった小さな指の動きは、手のひらとみなして元に戻す
 const REVERT_MAX_MOVE = 80;
+const TAP_MAX_MOVE = 10;       // これより動かなければタップ
+const TAP_MAX_MS = 350;
 
 export class InputController {
   constructor(el, viewport, handlers) {
@@ -21,6 +28,7 @@ export class InputController {
     this.wheelTimer = null;
     this.mode = 'touch';       // 'touch'（方式B・標準）または 'pointer'（方式A）
     this.pointers = new Map(); // 方式A：触れているもの
+    this.dragFinger = null;    // 物をつまんでいる指
     this.updateRect();
 
     const opt = { passive: false };
@@ -51,6 +59,7 @@ export class InputController {
       this.gesture = null;
       this.h.gestureEnd();
     }
+    this.cancelFingerDrag();
     this.fingers.clear();
     this.ignored.clear();
     this.pointers.clear();
@@ -76,16 +85,22 @@ export class InputController {
         if (this.stylusId !== null) continue;
         this.stylusId = t.identifier;
         this.stopInertia();
+        this.cancelFingerDrag();
         this.cancelFingers();
         const p = this.pos(t);
         this.h.stylusStart(p.x, p.y, t.force);
       } else {
-        if (this.stylusId !== null || (t.radiusX || 0) > PALM_RADIUS) {
+        if (this.stylusId !== null || this.dragFinger !== null || (t.radiusX || 0) > PALM_RADIUS) {
           this.ignored.add(t.identifier);
           continue;
         }
         this.stopInertia();
-        this.fingers.set(t.identifier, this.pos(t));
+        const p = this.pos(t);
+        if (!this.fingers.size && !this.gesture && this.h.fingerStart && this.h.fingerStart(p.x, p.y)) {
+          this.dragFinger = t.identifier;
+          continue;
+        }
+        this.fingers.set(t.identifier, p);
         this.resetGesture();
       }
     }
@@ -99,6 +114,9 @@ export class InputController {
       if (t.identifier === this.stylusId) {
         const p = this.pos(t);
         this.h.stylusMove(p.x, p.y, t.force);
+      } else if (t.identifier === this.dragFinger) {
+        const p = this.pos(t);
+        this.h.fingerMove(p.x, p.y);
       } else if (this.fingers.has(t.identifier)) {
         this.fingers.set(t.identifier, this.pos(t));
         fingerMoved = true;
@@ -115,6 +133,9 @@ export class InputController {
       if (t.identifier === this.stylusId) {
         this.stylusId = null;
         this.h.stylusEnd();
+      } else if (t.identifier === this.dragFinger) {
+        this.dragFinger = null;
+        this.h.fingerEnd(e.type === 'touchcancel' || e.type === 'pointercancel');
       } else if (this.ignored.has(t.identifier)) {
         this.ignored.delete(t.identifier);
       } else if (this.fingers.delete(t.identifier)) {
@@ -134,8 +155,16 @@ export class InputController {
       this.stylusId = null;
       this.h.stylusEnd();
     }
+    if (this.dragFinger !== null && !alive.has(this.dragFinger)) this.cancelFingerDrag();
     for (const id of [...this.fingers.keys()]) if (!alive.has(id)) this.fingers.delete(id);
     for (const id of [...this.ignored]) if (!alive.has(id)) this.ignored.delete(id);
+  }
+
+  // つまんでいた物を元に戻す（ペンが触れた・入力方式を変えたなど）
+  cancelFingerDrag() {
+    if (this.dragFinger === null) return;
+    this.dragFinger = null;
+    this.h.fingerEnd(true);
   }
 
   // ペンが触れたら、指の操作をやめる。直前の小さな動きは手のひらとみなして元に戻す
@@ -164,11 +193,15 @@ export class InputController {
         snapshot: { ox: this.vp.ox, oy: this.vp.oy, zoom: this.vp.zoom },
         moved: 0,
         samples: [],
+        maxFingers: 0,
+        tapAt: null,
       };
       this.h.gestureStart();
     }
     const g = this.gesture;
     g.samples = [];
+    g.maxFingers = Math.max(g.maxFingers, ids.length);
+    if (!g.tapAt && ids.length === 1) g.tapAt = { ...this.fingers.get(ids[0]) };
     if (ids.length === 1) {
       g.mode = 'pan';
       g.last = { ...this.fingers.get(ids[0]) };
@@ -211,8 +244,10 @@ export class InputController {
     const g = this.gesture;
     this.gesture = null;
     if (!g) return;
-    if (g.mode === 'pan' && this.startInertia(g.samples)) return;
+    const tap = g.maxFingers === 1 && g.tapAt && g.moved < TAP_MAX_MOVE && performance.now() - g.startTime < TAP_MAX_MS;
+    if (!tap && g.mode === 'pan' && this.startInertia(g.samples)) return;
     this.h.gestureEnd();
+    if (tap && this.h.fingerTap) this.h.fingerTap(g.tapAt.x, g.tapAt.y);
   }
 
   // 指をはじいたときの惰性スクロール

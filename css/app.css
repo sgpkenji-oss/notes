@@ -628,3 +628,80 @@ input, textarea { -webkit-user-select: text; user-select: text; font: inherit; }
   0%, 35% { box-shadow: 0 0 0 4px #e3a800, 0 6px 18px rgba(227, 168, 0, 0.45); background: #fff8dc; }
   100% { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12); background: #fff; }
 }
+
+/* ================= 第4段階：付箋・コネクタ・グループ枠・ボードページ ================= */
+
+#toolbar button[hidden] { display: none; }
+#toolbar .sticky-swatch i { border-radius: 4px; }
+
+/* ページの追加メニューの「ボード」 */
+.paper-board i {
+  background-color: #f7f7f4 !important;
+  background-image: radial-gradient(#c9ccc6 1px, transparent 1.4px);
+  background-size: 7px 7px;
+}
+
+/* ボードページの帯（左下） */
+#board-bar {
+  position: fixed;
+  z-index: 15;
+  left: calc(env(safe-area-inset-left) + 14px);
+  bottom: calc(env(safe-area-inset-bottom) + 14px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 12px 3px 3px;
+  border-radius: 16px;
+  background: rgba(40, 44, 52, 0.78);
+  color: #fff;
+  font-size: 13px;
+}
+#board-bar[hidden] { display: none; }
+#board-bar button {
+  border: none;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-radius: 13px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+#board-bar button:active { background: rgba(255, 255, 255, 0.34); }
+@media (max-width: 900px) { #board-bar .board-label { display: none; } #board-bar { padding-right: 3px; } }
+
+/* 付箋・コネクタ・枠をタップしたときの小さなメニュー */
+#object-menu {
+  position: fixed;
+  z-index: 25;
+  min-width: 200px;
+  padding: 10px;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+}
+#object-menu[hidden] { display: none; }
+.om-title { font-size: 12px; color: var(--muted); margin: 0 2px 8px; }
+.om-row { display: flex; gap: 6px; align-items: center; }
+.om-row + .om-row { margin-top: 8px; padding-top: 8px; border-top: 1px solid #eceef2; }
+.om-btn { flex: 1; height: 40px; padding: 0 12px; border: 1px solid #d5d9df; border-radius: 10px; background: #fff; font-size: 14px; white-space: nowrap; }
+.om-btn.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.om-btn:active { filter: brightness(0.94); }
+.om-btn.danger-text { border-color: #ebc4bf; }
+.om-swatch { width: 42px; height: 42px; border: none; border-radius: 10px; background: transparent; display: flex; align-items: center; justify-content: center; }
+.om-swatch i { width: 28px; height: 28px; border-radius: 6px; display: block; }
+.om-swatch.on { background: #e6edf5; box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* ページ一覧の「ボード」の印 */
+.pl-open { position: relative; }
+.pl-kind { position: absolute; left: 6px; top: 6px; padding: 3px 7px; border-radius: 6px; background: rgba(75, 90, 69, 0.85); color: #fff; font-size: 11px; line-height: 1.2; }
+
+/* 道具が増えたので、狭い画面では道具の名前を小さくする */
+@media (max-width: 1180px) {
+  #toolbar .tool { padding: 0 5px; font-size: 12px; gap: 2px; }
+  #toolbar .tool svg { width: 20px; height: 20px; }
+  #toolbar .sep { margin: 0 4px; }
+  #toolbar .size, #toolbar .swatch { min-width: 36px; }
+}
+@media (max-width: 980px) {
+  #toolbar .tool span { display: none; }
+  #toolbar .tool { padding: 0 8px; }
+}

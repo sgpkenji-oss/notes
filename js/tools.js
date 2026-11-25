@@ -1,11 +1,15 @@
-// 道具（ペン・マーカー・消しゴム）と、色・太さの選択。
-// ペンとマーカーは、それぞれ別に色と太さを覚える。
+// 道具（ペン・マーカー・消しゴム・なげなわ・付箋・コネクタ・枠）と、色・太さの選択。
+// ペンとマーカーは、それぞれ別に色と太さを覚える。付箋は新しく置く付箋の色を覚える。
+import { STICKY_COLORS } from './scene.js';
 
 export const TOOLS = [
   { key: 'pen', label: 'ペン' },
   { key: 'marker', label: 'マーカー' },
   { key: 'eraser', label: '消しゴム' },
   { key: 'lasso', label: 'なげなわ' },
+  { key: 'sticky', label: '付箋' },
+  { key: 'connector', label: 'コネクタ' },
+  { key: 'frame', label: '枠' },
 ];
 
 export const COLORS = [
@@ -29,6 +33,7 @@ const DEFAULT_STATE = {
   tool: 'pen',
   pen: { color: 'black', size: 'm' },
   marker: { color: 'yellow', size: 'm' },
+  sticky: { color: 'yellow' },
 };
 
 export class ToolState {
@@ -37,12 +42,19 @@ export class ToolState {
     this.tool = TOOLS.some((t) => t.key === s.tool) ? s.tool : DEFAULT_STATE.tool;
     this.pen = { ...DEFAULT_STATE.pen, ...(s.pen || {}) };
     this.marker = { ...DEFAULT_STATE.marker, ...(s.marker || {}) };
+    this.sticky = { ...DEFAULT_STATE.sticky, ...(s.sticky || {}) };
+    if (!STICKY_COLORS.some((c) => c.key === this.sticky.color)) this.sticky.color = DEFAULT_STATE.sticky.color;
     this.onChange = () => {};
   }
 
-  // いまの道具の色・太さ（消しゴムのときは null）
+  // いまの道具の色・太さ（ペン・マーカー・付箋のとき。ほかは null）
   get options() {
-    return this.tool === 'eraser' || this.tool === 'lasso' ? null : this[this.tool];
+    return this.tool === 'pen' || this.tool === 'marker' || this.tool === 'sticky' ? this[this.tool] : null;
+  }
+
+  // 太さを選べるか（ペンとマーカーだけ）
+  get hasSize() {
+    return this.tool === 'pen' || this.tool === 'marker';
   }
 
   setTool(tool) {
@@ -54,19 +66,20 @@ export class ToolState {
     this.onChange();
   }
   setSize(size) {
-    if (this.options) this.options.size = size;
+    if (this.hasSize) this.options.size = size;
     this.onChange();
   }
 
-  // 線のデータに入れる道具・色・太さ
+  // 線のデータに入れる道具・色・太さ（付箋・コネクタ・枠の道具で書くときは、ペンの色と太さ）
   strokeStyle() {
-    const o = this[this.tool];
+    const tool = this.tool === 'marker' ? 'marker' : 'pen';
+    const o = this[tool];
     const color = COLORS.find((c) => c.key === o.color) || COLORS[0];
     const size = SIZES.find((z) => z.key === o.size) || SIZES[1];
-    return { tool: this.tool, color: color[this.tool], width: size[this.tool] };
+    return { tool, color: color[tool], width: size[tool] };
   }
 
   toJSON() {
-    return { tool: this.tool, pen: { ...this.pen }, marker: { ...this.marker } };
+    return { tool: this.tool, pen: { ...this.pen }, marker: { ...this.marker }, sticky: { ...this.sticky } };
   }
 }

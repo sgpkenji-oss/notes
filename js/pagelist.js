@@ -1,9 +1,8 @@
 // ページ一覧：ページの縮小表示、並べ替え（つかんで動かす／‹ ›ボタン）、追加、削除。
-import * as db from './db.js';
 import { h, clear } from './dom.js';
 import { PAGE_WIDTH, PAGE_HEIGHT, PAPER_TYPES } from './model.js';
 import { drawPaper } from './paper.js';
-import { drawStroke, strokeGeometry } from './geometry.js';
+import { drawScene, contentBounds, drawBoardBackground } from './scene.js';
 import { confirmDialog } from './dialogs.js';
 import { toast } from './notices.js';
 
@@ -26,6 +25,10 @@ export class PageList {
         onclick: async () => { this.menu.hidden = true; await actions.add(p.key); this.render(); },
       }, h('i'), h('span', {}, p.label)));
     }
+    this.menu.append(h('button', {
+      type: 'button', class: 'paper paper-board',
+      onclick: async () => { this.menu.hidden = true; await actions.add('board'); this.render(); },
+    }, h('i'), h('span', {}, 'ボード')));
     const addButton = h('button', { type: 'button', class: 'primary-button', onclick: () => { this.menu.hidden = !this.menu.hidden; } }, '＋ ページを追加');
     this.el.append(
       h('header', { class: 'screen-head' },
@@ -33,7 +36,7 @@ export class PageList {
         this.title,
         h('div', { class: 'pl-add' }, addButton, this.menu)),
       h('div', { class: 'pl-body' },
-        h('p', { class: 'lib-hint' }, 'ページをタップすると開きます。「≡」をつかんで動かすか、「‹ ›」で並べ替えます。'),
+        h('p', { class: 'lib-hint' }, 'ページをタップすると開きます。「≡」をつかんで動かすか、「‹ ›」で並べ替えます。「ボード」は上下左右に広がるページです。'),
         this.grid));
   }
 
@@ -67,7 +70,8 @@ export class PageList {
       canvases.push([page, canvas]);
       let item = null;
       item = h('div', { class: `pl-item${i === current ? ' current' : ''}`, 'data-id': page.id },
-        h('button', { type: 'button', class: 'pl-open', 'aria-label': `${i + 1}ページ目を開く`, onclick: () => this.a.select(this.indexOf(item)) }, canvas),
+        h('button', { type: 'button', class: 'pl-open', 'aria-label': `${i + 1}ページ目を開く`, onclick: () => this.a.select(this.indexOf(item)) }, canvas,
+          page.kind === 'board' ? h('span', { class: 'pl-kind' }, 'ボード') : null),
         h('div', { class: 'pl-foot' },
           h('span', { class: 'pl-handle', 'aria-label': 'つかんで並べ替え', title: 'つかんで並べ替え' }, '≡'),
           h('span', { class: 'pl-num' }, String(i + 1)),
@@ -85,12 +89,8 @@ export class PageList {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     for (const [page, canvas] of list) {
       if (token !== this.token) return;
-      let strokes = this.nb.strokes(page.id);
-      if (!strokes) {
-        strokes = await db.getAllByIndex('strokes', 'pageId', page.id);
-        strokes.sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1));
-        if (token !== this.token) return;
-      }
+      const idx = await this.nb.fetchIndex(page.id);
+      if (token !== this.token) return;
       const w = Math.round(THUMB_W * dpr);
       const hgt = Math.round((w * PAGE_HEIGHT) / PAGE_WIDTH);
       canvas.width = w;
@@ -98,8 +98,23 @@ export class PageList {
       const ctx = canvas.getContext('2d');
       const s = w / PAGE_WIDTH;
       ctx.setTransform(s, 0, 0, s, 0, 0);
-      drawPaper(ctx, page.paper, { minX: 0, minY: 0, maxX: PAGE_WIDTH, maxY: PAGE_HEIGHT }, s);
-      for (const stroke of strokes) drawStroke(ctx, stroke, strokeGeometry(stroke));
+      const all = { minX: 0, minY: 0, maxX: PAGE_WIDTH, maxY: PAGE_HEIGHT };
+      if (page.kind === 'board') {
+        // ボードページは、中身全体が入るように縮めて描く
+        drawBoardBackground(ctx, all, s);
+        const cb = contentBounds(idx);
+        if (cb) {
+          const pad = 40;
+          const f = Math.min((PAGE_WIDTH - pad * 2) / Math.max(1, cb.maxX - cb.minX), (PAGE_HEIGHT - pad * 2) / Math.max(1, cb.maxY - cb.minY), 1);
+          ctx.translate(pad + ((PAGE_WIDTH - pad * 2) - (cb.maxX - cb.minX) * f) / 2, pad + ((PAGE_HEIGHT - pad * 2) - (cb.maxY - cb.minY) * f) / 2);
+          ctx.scale(f, f);
+          ctx.translate(-cb.minX, -cb.minY);
+          drawScene(ctx, idx, null, null);
+        }
+      } else {
+        drawPaper(ctx, page.paper, all, s);
+        drawScene(ctx, idx, all, null);
+      }
       await new Promise((r) => setTimeout(r, 0));
     }
   }

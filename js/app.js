@@ -10,7 +10,9 @@
 //   geometry.js  線の形・消しゴムの当たり判定
 //   input.js     ペンと指の入力（方式B：Touch Events が標準、方式A：Pointer Events も選べる）
 //   tools.js / toolbar.js  道具の選択と道具の帯
-//   lasso.js     なげなわ（選択・移動・コピー・削除・色変更）
+//   lasso.js     なげなわ（線・付箋・枠の選択・移動・コピー・削除・色変更）
+//   objects.js   付箋・コネクタ・グループ枠の操作
+//   scene.js     ページの中身（枠・コネクタ・線・付箋）の描き方
 //   tabs.js      タブの帯
 //   library.js   ライブラリ画面（フォルダ・タグ・ノート一覧）
 //   pagelist.js  ページ一覧
@@ -20,8 +22,8 @@
 //   history.js   元に戻す・やり直す（ノートごと）
 //   notices.js   お知らせ
 import * as db from './db.js';
-import { createAppState, PAGE_WIDTH, MAX_TABS, now } from './model.js';
-import { SCHEMA_VERSION, migrateAppState, migrateFolder, migrateNote } from './migrate.js';
+import { createAppState, PAGE_WIDTH, MAX_TABS, FRAME_BAND, now } from './model.js';
+import { SCHEMA_VERSION, migrateAppState, migrateFolder, migrateNote, migratePage } from './migrate.js';
 import { Notebook } from './notebook.js';
 import { Viewport } from './viewport.js';
 import { Renderer } from './renderer.js';
@@ -32,6 +34,8 @@ import { Toolbar } from './toolbar.js';
 import { History } from './history.js';
 import { hitStroke } from './geometry.js';
 import { Lasso } from './lasso.js';
+import { ObjectTools, changeRegion } from './objects.js';
+import { unionBounds } from './scene.js';
 import { Tabs } from './tabs.js';
 import { Library } from './library.js';
 import { PageList } from './pagelist.js';
@@ -53,6 +57,11 @@ const renderer = new Renderer(baseCanvas, viewport, notebook);
 const ink = new Ink(inkCanvas, viewport);
 const history = new History();
 const lasso = new Lasso({ viewport, notebook, renderer, ink, history });
+const objects = new ObjectTools({
+  viewport, notebook, renderer, ink, history, stage, toast,
+  beforeEdit: () => { if (lasso.hasSelection) lasso.clear(); },
+});
+lasso.commit = (pageId, before, after) => objects.commit(pageId, before, after);
 let appState = null;
 let tools = null;
 let toolbar = null;
@@ -78,6 +87,8 @@ async function loadAppState() {
     notes = notes.map(migrateNote);
     for (const n of notes) ops.push({ store: 'notes', put: n });
     for (const f of await db.getAll('folders')) ops.push({ store: 'folders', put: migrateFolder(f) });
+    // 第3段階まで → 第4段階：ページの種類（ノート／ボード）を必ず持たせる
+    for (const p of await db.getAll('pages')) ops.push({ store: 'pages', put: migratePage(p) });
   }
   if (!notes.length) {
     // 初めて起動したとき：「最初のノート」を作る
@@ -111,6 +122,7 @@ async function boot() {
 
   tools = new ToolState(appState.toolState);
   tools.onChange = onToolChange;
+  objects.stickyColor = () => tools.sticky.color;
   history.onChange = () => toolbar && toolbar.update();
   toolbar = new Toolbar({ tools, history, onUndo: undo, onRedo: redo, onAddPage: (paper) => addPageAfter(paper, viewport.currentPageIndex(), true) });
   setupLassoBar();
@@ -120,8 +132,12 @@ async function boot() {
 
   input = new InputController(stage, viewport, {
     stylusStart, stylusMove, stylusEnd,
+    fingerStart, fingerMove, fingerEnd, fingerTap,
     viewChanged,
-    gestureStart: () => renderer.setInteracting(true),
+    gestureStart: () => {
+      objects.closeMenu();
+      renderer.setInteracting(true);
+    },
     gestureEnd: () => {
       renderer.setInteracting(false);
       viewChanged();
@@ -132,6 +148,7 @@ async function boot() {
   ink.resize();
   renderer.resize();
   updatePageIndicator();
+  updateBoardBar();
   updateBackupBanner();
   new ResizeObserver(resize).observe(stage);
   window.addEventListener('keydown', onKeyDown);
@@ -162,6 +179,7 @@ function resize() {
   updatePageIndicator();
   placeLassoBar();
   if (lasso.hasSelection) lasso.redraw();
+  objects.closeMenu();
 }
 
 // ---- ノートの読み込み・切り替え ----
@@ -172,8 +190,12 @@ async function loadNote(noteId) {
   try {
     if (input) input.stopInertia();
     lasso.clear();
+    objects.cancel();
+    objects.closeMenu();
     ink.cancel();
     erasing = null;
+    penMode = null;
+    viewport.board = -1;
     await notebook.saveNote(); // 前のノートの保存を済ませる
     const note = await notebook.open(noteId);
     if (!notebook.pages.length) await notebook.addPage('ruled', -1);
@@ -185,6 +207,10 @@ async function loadNote(noteId) {
     const idx = notebook.pageIndexById(note.lastPageId);
     if (idx >= 0 && note.view) viewport.setAnchor({ pageIndex: idx, ...note.view });
     else viewport.setAnchor({ pageIndex: Math.max(0, idx), offsetY: -16 / viewport.scale, x: 0, zoom: 1 });
+    // ボードページを開いたまま閉じたノートは、ボードから始める
+    const boardIdx = note.boardPageId ? notebook.pageIndexById(note.boardPageId) : -1;
+    if (boardIdx >= 0 && notebook.pages[boardIdx].kind === 'board') showBoard(boardIdx);
+    else note.boardPageId = null;
 
     note.openedAt = now();
     tabNames.set(noteId, note.name);
@@ -197,6 +223,7 @@ async function loadNote(noteId) {
   }
   renderTabs();
   updatePageIndicator();
+  updateBoardBar();
   renderer.render();
 }
 
@@ -353,8 +380,7 @@ function setupScreens() {
     getCurrentIndex: () => viewport.currentPageIndex(),
     select: (i) => {
       closeScreens();
-      viewport.scrollToPage(i);
-      viewChanged();
+      goToPage(i);
     },
     add: (paper) => addPageAfter(paper, notebook.pages.length - 1, false),
     move: movePage,
@@ -391,9 +417,16 @@ function viewChanged() {
   renderer.requestRender();
   updatePageIndicator();
   if (switching) return;
-  const a = viewport.getAnchor();
-  const page = notebook.pages[a.pageIndex];
-  if (page) notebook.setView(page.id, { offsetY: round(a.offsetY), x: round(a.x), zoom: round(a.zoom, 1000) });
+  if (viewport.board >= 0) {
+    // ボードページの表示位置は、ページごとに覚える（ノートページの並びの表示位置は変えない）
+    const page = notebook.pages[viewport.board];
+    const v = viewport.getBoardView();
+    if (page) notebook.setBoardView(page.id, { x: round(v.x), y: round(v.y), zoom: round(v.zoom, 1000) });
+  } else {
+    const a = viewport.getAnchor();
+    const page = notebook.pages[a.pageIndex];
+    if (page) notebook.setView(page.id, { offsetY: round(a.offsetY), x: round(a.x), zoom: round(a.zoom, 1000) });
+  }
   const [first, last] = viewport.visiblePageRange();
   notebook.keepAround(first, last);
   if (lasso.hasSelection) lasso.redraw();
@@ -404,16 +437,108 @@ function round(v, k = 10) {
 }
 
 function updatePageIndicator() {
-  pageNumber.textContent = `${viewport.currentPageIndex() + 1} / ${notebook.pages.length}`;
+  pageNumber.textContent = `${viewport.currentPageIndex() + 1} / ${notebook.pages.length}${viewport.board >= 0 ? '（ボード）' : ''}`;
+}
+
+// ---- ボードページ ----
+// ボードページを開くと、画面いっぱいにそのページだけを出す（2本指で上下左右に移動・拡大縮小。広さに上限なし）。
+// 「← ノートページに戻る」で、開く前に見ていたノートページの位置に戻る。
+
+const boardBar = document.getElementById('board-bar');
+document.getElementById('board-back').addEventListener('click', () => {
+  closeBoard();
+  updateBoardBar();
+});
+
+function updateBoardBar() {
+  boardBar.hidden = viewport.board < 0;
+}
+
+// ボードページを表示する（表示位置はページごとに覚えたもの）
+function showBoard(index) {
+  const page = notebook.pages[index];
+  if (!page || page.kind !== 'board') return;
+  lasso.clear();
+  objects.cancel();
+  objects.closeMenu();
+  if (input) input.stopInertia();
+  viewport.board = index;
+  const v = notebook.boardView(page.id);
+  if (v) viewport.setBoardView(v);
+  else viewport.setBoardView({ x: -16 / viewport.fitScale, y: -16 / viewport.fitScale, zoom: 1 });
+  renderer.clearTiles();
+  if (notebook.note.boardPageId !== page.id) notebook.setBoardPage(page.id);
+}
+
+function openBoard(index) {
+  showBoard(index);
+  updateBoardBar();
+  viewChanged();
+  renderer.render();
+}
+
+// ノートページの並びに戻す（ボードを開く前に見ていた位置。無ければボードページの縮小表示の所）
+function closeBoard() {
+  if (viewport.board < 0) return;
+  const boardIndex = viewport.board;
+  lasso.clear();
+  objects.cancel();
+  objects.closeMenu();
+  if (input) input.stopInertia();
+  viewport.board = -1;
+  viewport.zoom = 1;
+  const note = notebook.note;
+  const idx = notebook.pageIndexById(note.lastPageId);
+  if (idx >= 0 && note.view) viewport.setAnchor({ pageIndex: idx, ...note.view });
+  else viewport.setAnchor({ pageIndex: Math.min(boardIndex, notebook.pages.length - 1), offsetY: -16 / viewport.scale, x: 0, zoom: 1 });
+  renderer.clearTiles();
+  notebook.setBoardPage(null);
+  viewChanged();
+  renderer.render();
+}
+
+// ページ一覧などから、そのページを表示する（ボードページなら開く）
+function goToPage(i) {
+  const page = notebook.pages[i];
+  if (!page) return;
+  if (page.kind === 'board') {
+    openBoard(i);
+    return;
+  }
+  closeBoard();
+  updateBoardBar();
+  viewport.scrollToPage(i);
+  viewChanged();
+}
+
+// ノートページの並びの中で、(sx, sy) がボードページの縮小表示の上なら、その番号
+function boardPreviewAt(sx, sy) {
+  if (viewport.board >= 0) return -1;
+  const doc = viewport.toDoc(sx, sy);
+  const i = viewport.pageIndexAt(doc.y);
+  return i >= 0 && notebook.pages[i].kind === 'board' && doc.x >= 0 && doc.x <= PAGE_WIDTH ? i : -1;
 }
 
 // ---- 道具 ----
+
+const TOOL_HINTS = {
+  sticky: '付箋：置きたい所をタップ。付箋の上はそのまま書けます。上の帯をつまんで移動、右下の角で大きさを変えます',
+  connector: 'コネクタ：付箋から付箋へなぞると、つながります。線をタップすると矢印と削除を選べます',
+  frame: '枠：付箋をぐるっと囲むと、グループ枠になります。上辺に名前を書けます（上辺をつまんで移動）',
+};
+const hintShown = new Set();
 
 let lastTool = null;
 function onToolChange() {
   if (lastTool !== null && lastTool !== tools.tool) {
     lasso.clear();
+    objects.cancel();
+    objects.closeMenu();
     if (!ink.active) ink.clear();
+    if (TOOL_HINTS[tools.tool] && !hintShown.has(tools.tool)) {
+      hintShown.add(tools.tool);
+      toast(TOOL_HINTS[tools.tool], 5000);
+    }
   }
   lastTool = tools.tool;
   toolbar.update();
@@ -463,13 +588,26 @@ function updateLassoBar() {
   }
 }
 
-// ---- ペン（書く・消す・なげなわ） ----
+// ---- ペン（書く・消す・なげなわ・付箋など） ----
+
+let penMode = null;      // いまのペンの操作：'board-tap'（ボードページの縮小表示をタップ）など
+let boardTap = null;
 
 function stylusStart(sx, sy, force) {
+  objects.closeMenu();
+  penMode = null;
+  const preview = boardPreviewAt(sx, sy);
+  if (preview >= 0) {
+    // ノートページの並びの中のボードページ：タップで開く
+    penMode = 'board-tap';
+    boardTap = { index: preview, sx, sy, moved: false };
+    return;
+  }
   if (tools.tool === 'lasso') {
     lasso.begin(sx, sy);
     return;
   }
+  if (objects.penStart(sx, sy, tools.tool)) return; // 付箋の帯・角、コネクタ、枠など
   const doc = viewport.toDoc(sx, sy);
   if (tools.tool === 'eraser') {
     erasing = { removed: [], last: doc };
@@ -478,14 +616,28 @@ function stylusStart(sx, sy, force) {
     return;
   }
   const idx = viewport.pageIndexAt(doc.y);
-  if (idx < 0 || doc.x < 0 || doc.x > PAGE_WIDTH) return; // ページの外では書かない
+  if (idx < 0) return;
+  if (viewport.board < 0 && (doc.x < 0 || doc.x > PAGE_WIDTH)) return; // ページの外では書かない
   const page = notebook.pages[idx];
-  ink.begin(page.id, idx, tools.strokeStyle());
-  ink.add(doc.x, doc.y - viewport.pageTop(idx), force);
+  const y = doc.y - viewport.pageTop(idx);
+  // 付箋の上・枠の上辺なら、その中に書く（付箋・枠からの相対位置で持つ）
+  const target = objects.writeTarget(page.id, doc.x, y);
+  const style = { ...tools.strokeStyle(), stickyId: (target && target.stickyId) || null, frameId: (target && target.frameId) || null };
+  ink.begin(page.id, idx, style, target ? target.origin : null);
+  const o = ink.origin;
+  ink.add(doc.x - (o ? o.x : 0), y - (o ? o.y : 0), force);
   ink.draw();
 }
 
 function stylusMove(sx, sy, force) {
+  if (penMode === 'board-tap') {
+    if (Math.hypot(sx - boardTap.sx, sy - boardTap.sy) > 12) boardTap.moved = true;
+    return;
+  }
+  if (objects.active) {
+    objects.move(sx, sy);
+    return;
+  }
   if (lasso.active) {
     lasso.move(sx, sy);
     return;
@@ -499,11 +651,22 @@ function stylusMove(sx, sy, force) {
   }
   if (!ink.active) return;
   const doc = viewport.toDoc(sx, sy);
-  ink.add(doc.x, doc.y - viewport.pageTop(ink.pageIndex), force);
+  const o = ink.origin;
+  ink.add(doc.x - (o ? o.x : 0), doc.y - viewport.pageTop(ink.pageIndex) - (o ? o.y : 0), force);
   ink.draw(appState.settings.prediction);
 }
 
 function stylusEnd() {
+  if (penMode === 'board-tap') {
+    penMode = null;
+    if (!boardTap.moved) openBoard(boardTap.index);
+    boardTap = null;
+    return;
+  }
+  if (objects.active) {
+    objects.end();
+    return;
+  }
   if (lasso.active) {
     lasso.end();
     return;
@@ -525,17 +688,57 @@ function stylusEnd() {
   history.push({ type: 'add', strokes: [stroke] });
 }
 
-// 消しゴム：a→b の間で触れた線を、1本まるごと消す
+// ---- 指（付箋の帯・枠の上辺をつまむ、コネクタ・ボードページの縮小表示をタップ） ----
+
+function fingerStart(sx, sy) {
+  if (screenOpen() || ink.active || erasing || lasso.active || objects.active) return false;
+  return objects.fingerStart(sx, sy);
+}
+
+function fingerMove(sx, sy) {
+  objects.move(sx, sy);
+}
+
+function fingerEnd(cancelled) {
+  if (cancelled) objects.cancel();
+  else objects.end();
+}
+
+function fingerTap(sx, sy) {
+  if (screenOpen()) return;
+  if (objects.fingerTap(sx, sy)) return;
+  const preview = boardPreviewAt(sx, sy);
+  if (preview >= 0) openBoard(preview);
+}
+
+// 消しゴム：a→b の間で触れた線を、1本まるごと消す。
+// 付箋の上では、その付箋の中の線だけを消す（下に隠れているページの線は消さない）。枠の上辺では、枠の名前の線も消す
 function eraseAlong(a, b) {
   const r = ERASER_RADIUS / viewport.scale;
   const [first, last] = viewport.visiblePageRange();
   let changed = false;
   for (let i = first; i <= last; i++) {
     const page = notebook.pages[i];
-    const list = notebook.strokes(page.id);
-    if (!list) continue;
+    if (page.kind === 'board' && viewport.board < 0) continue; // ボードページの縮小表示
+    const index = notebook.index(page.id);
+    if (!index) continue;
     const top = viewport.pageTop(i);
-    const hits = list.filter((s) => hitStroke(s, a.x, a.y - top, b.x, b.y - top, r));
+    const ax = a.x, ay = a.y - top, bx = b.x, by = b.y - top;
+    const hitIn = (list, o) => (list || []).filter((s) => hitStroke(s, ax - o.x, ay - o.y, bx - o.x, by - o.y, r));
+    let over = null;
+    for (let k = index.stickies.length - 1; k >= 0; k--) {
+      const st = index.stickies[k];
+      if (bx >= st.x && bx <= st.x + st.w && by >= st.y && by <= st.y + st.h) { over = st; break; }
+    }
+    let hits;
+    if (over) {
+      hits = hitIn(index.bySticky.get(over.id), over);
+    } else {
+      hits = hitIn(index.free, { x: 0, y: 0 });
+      for (const f of index.frames) {
+        if (bx >= f.x && bx <= f.x + f.w && by >= f.y && by <= f.y + Math.min(f.h, FRAME_BAND)) hits.push(...hitIn(index.byFrame.get(f.id), f));
+      }
+    }
     if (!hits.length) continue;
     notebook.removeStrokes(hits);
     for (const s of hits) renderer.invalidateStroke(s);
@@ -548,19 +751,30 @@ function eraseAlong(a, b) {
 // ---- 元に戻す・やり直す ----
 
 function undo() {
-  if (ink.active || erasing || lasso.active) return;
+  if (ink.active || erasing || lasso.active || objects.active) return;
   const e = history.undo();
   if (e) applyHistory(e, true);
 }
 
 function redo() {
-  if (ink.active || erasing || lasso.active) return;
+  if (ink.active || erasing || lasso.active || objects.active) return;
   const e = history.redo();
   if (e) applyHistory(e, false);
 }
 
 function applyHistory(entry, isUndo) {
   lasso.clear(); // 選択はやめる（線が入れ替わるため）
+  objects.closeMenu();
+  if (entry.type === 'change') {
+    // 付箋・コネクタ・枠・線をまとめて入れ替える
+    const from = isUndo ? entry.after : entry.before;
+    const to = isUndo ? entry.before : entry.after;
+    const r0 = changeRegion(notebook.index(entry.pageId), [from, to]);
+    notebook.applyChange(from, to);
+    const r1 = changeRegion(notebook.index(entry.pageId), [from, to]);
+    renderer.refresh(entry.pageId, r0 || r1 ? unionBounds(r0, r1) : null);
+    return;
+  }
   if (entry.type === 'replace') {
     const from = isUndo ? entry.after : entry.before;
     const to = isUndo ? entry.before : entry.after;
@@ -594,7 +808,8 @@ async function addPageAfter(paper, afterIndex, goTo) {
   try {
     const idx = await notebook.addPage(paper, afterIndex);
     viewport.pageCount = notebook.pages.length;
-    if (goTo) viewport.scrollToPage(idx);
+    if (viewport.board >= 0 && idx <= viewport.board) viewport.board++; // 開いているボードより前に足した
+    if (goTo) goToPage(idx);
     viewChanged();
   } catch (err) {
     notebook.onError(err);
@@ -603,6 +818,23 @@ async function addPageAfter(paper, afterIndex, goTo) {
 
 // 見ているページを覚えておき、並べ替え・削除のあとも同じページを見続ける
 function keepAnchorAround(change) {
+  if (viewport.board >= 0) {
+    // ボードページを開いているとき：そのボードを開いたままにする（消したときはノートページの並びに戻る）
+    const boardId = notebook.pages[viewport.board].id;
+    return change().then((result) => {
+      viewport.pageCount = notebook.pages.length;
+      const i = notebook.pageIndexById(boardId);
+      if (i >= 0) viewport.board = i;
+      else {
+        viewport.board = Math.min(viewport.board, notebook.pages.length - 1);
+        notebook.note.boardPageId = null;
+        closeBoard();
+        updateBoardBar();
+      }
+      viewChanged();
+      return result;
+    });
+  }
   const anchor = viewport.getAnchor();
   const page = notebook.pages[anchor.pageIndex];
   return change().then((result) => {
@@ -689,7 +921,8 @@ async function runBackup() {
   appState.lastBackupAt = r.exportedAt;
   await saveAppState();
   updateBackupBanner();
-  toast(`バックアップを書き出しました（ノート${r.counts.notes}冊・ページ${r.counts.pages}枚）`, 4000);
+  const extra = r.counts.stickies ? `・付箋${r.counts.stickies}枚` : '';
+  toast(`バックアップを書き出しました（ノート${r.counts.notes}冊・ページ${r.counts.pages}枚${extra}）`, 4000);
   return r;
 }
 
@@ -706,7 +939,7 @@ async function importBackupFile(file) {
   const ok = await confirmDialog({
     title: 'バックアップを読み込みますか？',
     message:
-      `いまのデータ（ノート${nowNotes}冊）はすべて消え、${when}バックアップ（ノート${parsed.counts.notes}冊・ページ${parsed.counts.pages}枚）の内容に入れ替わります。元に戻せません。\n` +
+      `いまのデータ（ノート${nowNotes}冊）はすべて消え、${when}バックアップ（ノート${parsed.counts.notes}冊・ページ${parsed.counts.pages}枚${parsed.counts.stickies ? `・付箋${parsed.counts.stickies}枚` : ''}）の内容に入れ替わります。元に戻せません。\n` +
       'いまのデータを残したいときは、先に「バックアップを書き出す」を行ってください。',
     okLabel: '入れ替える', danger: true,
   });
@@ -735,6 +968,6 @@ boot().catch((err) => {
 
 // 確認用（ブラウザの開発ツールから中身を見られるように）
 window.__notes = {
-  notebook, viewport, renderer, history, lasso,
+  notebook, viewport, renderer, history, lasso, objects,
   get appState() { return appState; },
 };

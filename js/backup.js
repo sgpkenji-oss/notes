@@ -32,7 +32,11 @@ export async function buildBackup() {
 }
 
 function summarize(data) {
-  return { notes: data.notes.length, pages: data.pages.length, strokes: data.strokes.length, folders: data.folders.length };
+  const n = (name) => (data[name] || []).length;
+  return {
+    notes: n('notes'), pages: n('pages'), strokes: n('strokes'), folders: n('folders'),
+    stickies: n('stickies'), connectors: n('connectors'), frames: n('frames'),
+  };
 }
 
 function makeFile(blob, filename) {

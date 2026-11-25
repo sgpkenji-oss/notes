@@ -15,6 +15,7 @@ export class Ink {
     this.pageIndex = -1;
     this.pressure = null;
     this.dirty = null;
+    this.origin = null; // 付箋・枠の中に書くとき：{ x, y }（線の座標の原点のページ座標）と clip（はみ出さない範囲。原点からの相対）
   }
 
   resize() {
@@ -28,10 +29,12 @@ export class Ink {
     return !!this.stroke;
   }
 
-  begin(pageId, pageIndex, style) {
+  // origin：付箋・枠の中に書くとき { x, y, clip: { x, y, w, h } }。x, y の点が線の座標の原点になる
+  begin(pageId, pageIndex, style, origin = null) {
     this.clear();
     this.stroke = createStroke({ pageId, ...style });
     this.pageIndex = pageIndex;
+    this.origin = origin;
     this.pressure = null;
     // マーカーは下の線と色が重なって見えるように（確定後の見た目とそろえる）
     this.canvas.style.mixBlendMode = style.tool === 'marker' ? 'multiply' : 'normal';
@@ -76,14 +79,28 @@ export class Ink {
     this.clearDirty();
     const S = vp.deviceScale;
     // 下の canvas と同じ丸め方で位置を合わせる
-    const X0 = Math.round(vp.ox * vp.dpr);
-    const Y0 = Math.round((vp.oy + vp.pageTop(this.pageIndex) * vp.scale) * vp.dpr);
+    let X0 = Math.round(vp.ox * vp.dpr);
+    let Y0 = Math.round((vp.oy + vp.pageTop(this.pageIndex) * vp.scale) * vp.dpr);
+    const o = this.origin;
+    if (o) {
+      X0 += o.x * S;
+      Y0 += o.y * S;
+    }
     let shown = this.stroke;
     const extra = predict ? this.predicted() : null;
     if (extra) shown = { ...shown, points: shown.points.concat(extra) };
     const g = buildGeometry(shown);
     ctx.setTransform(S, 0, 0, S, X0, Y0);
-    drawStroke(ctx, shown, g);
+    if (o && o.clip) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(o.clip.x, o.clip.y, o.clip.w, o.clip.h);
+      ctx.clip();
+      drawStroke(ctx, shown, g);
+      ctx.restore();
+    } else {
+      drawStroke(ctx, shown, g);
+    }
     const b = g.bounds;
     this.dirty = {
       x: Math.floor(X0 + b.minX * S) - 2,
