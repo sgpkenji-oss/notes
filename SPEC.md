@@ -16,7 +16,7 @@ GoodNotesの代わりに、iPad＋Apple Pencilで使う自分専用の手書き�
 | 項目 | 決定 | 理由 |
 | --- | --- | --- |
 | 作り方 | Webアプリ（iPadのSafariで動かし、ホーム画面に追加して使う） | iPad専用アプリは年99ドルの開発者登録か、7日ごとの入れ直しが必要なため |
-| 置き場所 | GitHub Pages（無料）。https://sakai-notes.github.io/notes/ | データをiPadに安定して保存でき、ホーム画面にも追加できる |
+| 置き場所 | GitHub Pages（無料）。https://sgpkenji-oss.github.io/notes/ | データをiPadに安定して保存でき、ホーム画面にも追加できる |
 | 手書きの入力方式 | 入力方式B（Touch Events） | 書き心地テストで、方式Aは書けないことが多く、方式Bは「GoodNotesより遅延を感じるが余裕で使える」結果だった |
 | 先読み表示 | 標準はオフ（設定でオンにできる） | オンは線がきれいになるが、補正されている違和感がある |
 | 使用する機器 | iPad＋Apple Pencil（第2世代） | 本人の機器 |
