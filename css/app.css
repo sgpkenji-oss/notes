@@ -621,3 +621,10 @@ input, textarea { -webkit-user-select: text; user-select: text; font: inherit; }
 .tag-toggle.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .tag-add { display: flex; gap: 8px; align-items: center; }
 .tag-add .dlg-input { margin: 0; flex: 1; }
+
+/* ページ一覧：並べ替えたページを一瞬ハイライト */
+.pl-item.flash { animation: pl-flash 1.1s ease; }
+@keyframes pl-flash {
+  0%, 35% { box-shadow: 0 0 0 4px #e3a800, 0 6px 18px rgba(227, 168, 0, 0.45); background: #fff8dc; }
+  100% { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12); background: #fff; }
+}
