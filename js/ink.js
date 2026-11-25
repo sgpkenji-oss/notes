@@ -55,7 +55,22 @@ export class Ink {
     pts.push(round2(x), round2(y), round3(this.pressure));
   }
 
-  draw() {
+  // 先読み表示：最後の動きの向きに、少しだけ先まで線を描き足して見せる（保存はしない）
+  predicted() {
+    const pts = this.stroke.points;
+    const n = pts.length;
+    if (n < 6) return null;
+    let dx = pts[n - 3] - pts[n - 6], dy = pts[n - 2] - pts[n - 5];
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6) return null;
+    const max = 14 / this.vp.scale; // 画面上で14pxまで
+    const k = Math.min(1, max / len);
+    dx *= k;
+    dy *= k;
+    return [pts[n - 3] + dx, pts[n - 2] + dy, pts[n - 1]];
+  }
+
+  draw(predict = false) {
     if (!this.stroke) return;
     const vp = this.vp, ctx = this.ctx;
     this.clearDirty();
@@ -63,9 +78,12 @@ export class Ink {
     // 下の canvas と同じ丸め方で位置を合わせる
     const X0 = Math.round(vp.ox * vp.dpr);
     const Y0 = Math.round((vp.oy + vp.pageTop(this.pageIndex) * vp.scale) * vp.dpr);
-    const g = buildGeometry(this.stroke);
+    let shown = this.stroke;
+    const extra = predict ? this.predicted() : null;
+    if (extra) shown = { ...shown, points: shown.points.concat(extra) };
+    const g = buildGeometry(shown);
     ctx.setTransform(S, 0, 0, S, X0, Y0);
-    drawStroke(ctx, this.stroke, g);
+    drawStroke(ctx, shown, g);
     const b = g.bounds;
     this.dirty = {
       x: Math.floor(X0 + b.minX * S) - 2,
@@ -98,6 +116,18 @@ export class Ink {
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     this.dirty = null;
+  }
+
+  // 画面全体を使う重ね描き（なげなわの輪・選択の枠など）。fn(ctx, dpr) には画面座標で描ける ctx を渡す
+  overlay(fn) {
+    const ctx = this.ctx, d = this.vp.dpr;
+    this.canvas.style.mixBlendMode = 'normal';
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.setTransform(d, 0, 0, d, 0, 0);
+    fn(ctx, d);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.dirty = { x: 0, y: 0, x1: this.canvas.width, y1: this.canvas.height };
   }
 
   // 消しゴムの位置を丸で示す（sx, sy は画面座標）

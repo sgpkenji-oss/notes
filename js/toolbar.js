@@ -6,6 +6,7 @@ const ICONS = {
   pen: '<svg viewBox="0 0 24 24"><path d="M4 20l1.2-4.6L16.6 4a2 2 0 0 1 2.8 0l.6.6a2 2 0 0 1 0 2.8L8.6 18.8 4 20z"/><path d="M14.5 6.1l3.4 3.4"/></svg>',
   marker: '<svg viewBox="0 0 24 24"><path d="M9 15l-2.5 5h5L13 17"/><path d="M9 15l8.5-10.5a2 2 0 0 1 2.9-.2l.3.3a2 2 0 0 1-.2 2.9L13 17z"/><path d="M3 21h8"/></svg>',
   eraser: '<svg viewBox="0 0 24 24"><path d="M8.5 20L3.7 15.2a1.5 1.5 0 0 1 0-2.1L13 3.8a1.5 1.5 0 0 1 2.1 0l5.1 5.1a1.5 1.5 0 0 1 0 2.1L11 20z"/><path d="M8 9.5l6.5 6.5"/><path d="M11 20h9"/></svg>',
+  lasso: '<svg viewBox="0 0 24 24"><path stroke-dasharray="3 2.6" d="M12 4c4.6 0 8 2.2 8 5s-3.4 5-8 5-8-2.2-8-5 3.4-5 8-5z"/><path d="M8.5 13.6c-.9 1.6-.6 3.4 1 4.3 1.2.7 2.5.4 3-.6"/></svg>',
   undo: '<svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>',
   redo: '<svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>',
 };

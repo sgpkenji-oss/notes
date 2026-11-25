@@ -2,6 +2,7 @@
 // touchType が "stylus"（Apple Pencil）のときだけ線を書き、指は画面の移動・拡大縮小に使う。
 // 手のひらで画面が動かないように、ペンが触れている間の指はすべて無視する。
 // パソコンで確かめるときのために、マウスで書く・ホイールで動かすこともできる。
+// 設定で「入力方式A（Pointer Events）」にすると、同じ処理を Pointer Events の入力で動かす（標準はB）。
 const PALM_RADIUS = 45;        // これより大きく触れたものは手のひらとみなす（CSSピクセル）
 const REVERT_WINDOW_MS = 400;  // ペンの直前に始まった小さな指の動きは、手のひらとみなして元に戻す
 const REVERT_MAX_MOVE = 80;
@@ -18,6 +19,8 @@ export class InputController {
     this.inertia = null;
     this.mouseDown = false;
     this.wheelTimer = null;
+    this.mode = 'touch';       // 'touch'（方式B・標準）または 'pointer'（方式A）
+    this.pointers = new Map(); // 方式A：触れているもの
     this.updateRect();
 
     const opt = { passive: false };
@@ -29,6 +32,29 @@ export class InputController {
     window.addEventListener('mousemove', (e) => this.onMouseMove(e));
     window.addEventListener('mouseup', (e) => this.onMouseUp(e));
     el.addEventListener('wheel', (e) => this.onWheel(e), opt);
+    el.addEventListener('pointerdown', (e) => this.onPointerDown(e));
+    el.addEventListener('pointermove', (e) => this.onPointerMove(e));
+    el.addEventListener('pointerup', (e) => this.onPointerEnd(e));
+    el.addEventListener('pointercancel', (e) => this.onPointerEnd(e));
+  }
+
+  // 入力方式を切り替える。途中の操作はいったんやめる
+  setMode(mode) {
+    const next = mode === 'pointer' ? 'pointer' : 'touch';
+    if (next === this.mode) return;
+    this.stopInertia();
+    if (this.stylusId !== null) {
+      this.stylusId = null;
+      this.h.stylusEnd();
+    }
+    if (this.gesture) {
+      this.gesture = null;
+      this.h.gestureEnd();
+    }
+    this.fingers.clear();
+    this.ignored.clear();
+    this.pointers.clear();
+    this.mode = next;
   }
 
   updateRect() {
@@ -41,7 +67,8 @@ export class InputController {
 
   // ---- タッチ ----
 
-  onTouchStart(e) {
+  onTouchStart(e, fromPointer = false) {
+    if (!fromPointer && this.mode !== 'touch') return;
     e.preventDefault();
     this.dropStaleTouches(e.touches);
     for (const t of e.changedTouches) {
@@ -64,7 +91,8 @@ export class InputController {
     }
   }
 
-  onTouchMove(e) {
+  onTouchMove(e, fromPointer = false) {
+    if (!fromPointer && this.mode !== 'touch') return;
     e.preventDefault();
     let fingerMoved = false;
     for (const t of e.changedTouches) {
@@ -79,7 +107,8 @@ export class InputController {
     if (fingerMoved) this.applyGesture();
   }
 
-  onTouchEnd(e) {
+  onTouchEnd(e, fromPointer = false) {
+    if (!fromPointer && this.mode !== 'touch') return;
     e.preventDefault();
     let changed = false;
     for (const t of e.changedTouches) {
@@ -226,9 +255,59 @@ export class InputController {
     this.h.gestureEnd();
   }
 
+  // ---- 入力方式A（Pointer Events） ----
+  // タッチの処理（onTouch〜）をそのまま使えるように、Pointer Events を「タッチの形」に直して渡す。
+
+  pointerAsTouch(e) {
+    return {
+      identifier: e.pointerId,
+      touchType: e.pointerType === 'touch' ? 'direct' : 'stylus', // ペンとマウスは「書く」側
+      radiusX: (e.width || 0) / 2,
+      radiusY: (e.height || 0) / 2,
+      force: e.pressure,
+      clientX: e.clientX,
+      clientY: e.clientY,
+    };
+  }
+
+  fakeTouchEvent(changed) {
+    return { preventDefault() {}, changedTouches: changed, touches: [...this.pointers.values()] };
+  }
+
+  onPointerDown(e) {
+    if (this.mode !== 'pointer') return;
+    e.preventDefault();
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    try { this.el.setPointerCapture(e.pointerId); } catch {}
+    this.updateRect();
+    const t = this.pointerAsTouch(e);
+    this.pointers.set(e.pointerId, t);
+    this.onTouchStart(this.fakeTouchEvent([t]), true);
+  }
+
+  onPointerMove(e) {
+    if (this.mode !== 'pointer' || !this.pointers.has(e.pointerId)) return;
+    e.preventDefault();
+    const events = e.pointerType === 'pen' && e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+    for (const ev of events.length ? events : [e]) {
+      const t = this.pointerAsTouch(ev);
+      this.pointers.set(e.pointerId, t);
+      this.onTouchMove(this.fakeTouchEvent([t]), true);
+    }
+  }
+
+  onPointerEnd(e) {
+    if (this.mode !== 'pointer' || !this.pointers.has(e.pointerId)) return;
+    e.preventDefault();
+    const t = this.pointerAsTouch(e);
+    this.pointers.delete(e.pointerId);
+    this.onTouchEnd(this.fakeTouchEvent([t]), true);
+  }
+
   // ---- マウスとホイール（パソコンでの確認用） ----
 
   onMouseDown(e) {
+    if (this.mode !== 'touch') return;
     if (e.button !== 0 || this.stylusId !== null) return;
     e.preventDefault();
     this.mouseDown = true;
@@ -238,7 +317,7 @@ export class InputController {
   }
 
   onMouseMove(e) {
-    if (!this.mouseDown) return;
+    if (this.mode !== 'touch' || !this.mouseDown) return;
     const p = this.pos(e);
     this.h.stylusMove(p.x, p.y, 0.5);
   }

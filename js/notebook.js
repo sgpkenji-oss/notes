@@ -31,6 +31,7 @@ export class Notebook {
     this.onPageLoaded = () => {};
     this.onError = (err) => console.error(err);
     this.saveTimer = null;
+    this.disabled = false; // バックアップの読み込み中は、古い写しを書き戻さないように保存をやめる
   }
 
   async open(noteId) {
@@ -106,6 +107,22 @@ export class Notebook {
     return db.deleteMany('strokes', strokes.map((s) => s.id)).catch((err) => this.onError(err));
   }
 
+  // 同じIDの線を新しい中身に入れ替える（動かす・色を変える）。before と after は同じ順で同じ数
+  replaceStrokes(before, after) {
+    for (const s of before) {
+      const list = this.strokesByPage.get(s.pageId);
+      if (list) removeById(list, s.id);
+      else if (this.loading.has(s.pageId)) this.queue(s.pageId, { remove: s.id });
+    }
+    for (const s of after) {
+      const list = this.strokesByPage.get(s.pageId);
+      if (list) insertSorted(list, s);
+      else if (this.loading.has(s.pageId)) this.queue(s.pageId, { add: s });
+    }
+    this.touch();
+    return db.putMany('strokes', after).catch((err) => this.onError(err)); // 同じIDを上書きするので、保存は1回
+  }
+
   queue(pageId, op) {
     if (!this.pending.has(pageId)) this.pending.set(pageId, []);
     this.pending.get(pageId).push(op);
@@ -125,6 +142,50 @@ export class Notebook {
     this.strokesByPage.set(page.id, []);
     this.touch();
     return afterIndex + 1;
+  }
+
+  // ページの並べ替え。from の番号のページを to の番号に動かす
+  async movePage(from, to) {
+    if (from === to || from < 0 || to < 0 || from >= this.pages.length || to >= this.pages.length) return;
+    const [page] = this.pages.splice(from, 1);
+    this.pages.splice(to, 0, page);
+    const prev = this.pages[to - 1];
+    const next = this.pages[to + 1];
+    let order;
+    if (!prev) order = next.order - 1;
+    else if (!next) order = prev.order + 1;
+    else order = (prev.order + next.order) / 2;
+    const t = now();
+    if (prev && next && next.order - prev.order < 1e-6) {
+      // 並び順の数が近づきすぎたので、全部を振り直す
+      this.pages.forEach((p, i) => { p.order = i + 1; p.updatedAt = t; });
+      await db.putMany('pages', this.pages);
+    } else {
+      page.order = order;
+      page.updatedAt = t;
+      await db.put('pages', page);
+    }
+    this.touch();
+  }
+
+  // ページを消す（そのページの線・付箋なども一緒に）。最後の1枚は消せない
+  async deletePage(index) {
+    const page = this.pages[index];
+    if (!page || this.pages.length <= 1) return false;
+    const ops = [{ store: 'pages', delete: page.id }];
+    for (const store of ['strokes', 'stickies', 'connectors', 'frames']) {
+      for (const id of await db.getKeysByIndex(store, 'pageId', page.id)) ops.push({ store, delete: id });
+    }
+    await db.writeBatch(ops);
+    this.pages.splice(index, 1);
+    this.strokesByPage.delete(page.id);
+    this.pending.delete(page.id);
+    if (this.note.lastPageId === page.id) {
+      this.note.lastPageId = this.pages[Math.min(index, this.pages.length - 1)].id;
+      this.note.view = null;
+    }
+    this.touch();
+    return true;
   }
 
   // 「前回の続き」用に、見ているページと表示位置を覚える（少し待ってまとめて保存）
@@ -147,7 +208,7 @@ export class Notebook {
   saveNote() {
     clearTimeout(this.saveTimer);
     this.saveTimer = null;
-    if (!this.note) return Promise.resolve();
+    if (!this.note || this.disabled) return Promise.resolve();
     return db.put('notes', this.note).catch((err) => this.onError(err));
   }
 }

@@ -5,6 +5,7 @@ export const TOOLS = [
   { key: 'pen', label: 'ペン' },
   { key: 'marker', label: 'マーカー' },
   { key: 'eraser', label: '消しゴム' },
+  { key: 'lasso', label: 'なげなわ' },
 ];
 
 export const COLORS = [
@@ -41,7 +42,7 @@ export class ToolState {
 
   // いまの道具の色・太さ（消しゴムのときは null）
   get options() {
-    return this.tool === 'eraser' ? null : this[this.tool];
+    return this.tool === 'eraser' || this.tool === 'lasso' ? null : this[this.tool];
   }
 
   setTool(tool) {

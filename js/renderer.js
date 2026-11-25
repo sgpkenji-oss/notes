@@ -50,6 +50,16 @@ export class Renderer {
     this.frame = 0;
     this.scheduled = false;
     this.interacting = false; // 指で操作中（拡大率が変わっている途中）
+    this.hidden = new Set();  // なげなわで持ち上げている線のID（下の絵には描かない）
+  }
+
+  // ノートを切り替えたとき、覚えていた絵をすべて捨てる
+  reset() {
+    this.dropLayer(this.layer);
+    this.dropLayer(this.oldLayer);
+    this.layer = null;
+    this.oldLayer = null;
+    this.hidden = new Set();
   }
 
   resize() {
@@ -184,6 +194,7 @@ export class Renderer {
     drawPaper(ctx, page.paper, r, s);
     const strokes = this.nb.strokes(page.id) || [];
     for (const stroke of strokes) {
+      if (this.hidden.size && this.hidden.has(stroke.id)) continue;
       const g = strokeGeometry(stroke);
       if (boundsIntersect(g.bounds, r)) drawStroke(ctx, stroke, g);
     }

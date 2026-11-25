@@ -7,6 +7,10 @@ export const PAGE_HEIGHT = 1414;
 // ページとページのすきま（ページ座標の単位）
 export const PAGE_GAP = 28;
 
+// タブの数の上限、フォルダの深さの上限
+export const MAX_TABS = 8;
+export const MAX_FOLDER_DEPTH = 3;
+
 export const PAPER_TYPES = [
   { key: 'plain', label: '無地' },
   { key: 'ruled', label: '罫線' },
@@ -28,7 +32,7 @@ function base(fields) {
   return { id: newId(), createdAt: t, updatedAt: t, ...fields };
 }
 
-// フォルダ（第3段階で使う）
+// フォルダ（3階層まで。親フォルダが null なら一番上）
 export function createFolder({ name, parentId = null, order = 0 }) {
   return base({ name, parentId, order });
 }
@@ -36,7 +40,7 @@ export function createFolder({ name, parentId = null, order = 0 }) {
 // ノート。lastPageId と view で「前回の続き」を開く。
 // view = { offsetY: ページ上端から画面上端までの距離, x: 画面左端のページ座標, zoom: 画面幅に合わせた大きさを1とした拡大率 }
 export function createNote({ name, folderId = null }) {
-  return base({ name, folderId, tags: [], pinned: false, lastPageId: null, view: null });
+  return base({ name, folderId, tags: [], pinned: false, lastPageId: null, view: null, openedAt: now() });
 }
 
 // ページ。kind は 'note'（ノートページ）か 'board'（ボードページ、第4段階）。
@@ -59,7 +63,9 @@ export function createAppState(noteId) {
     id: 'app',
     createdAt: t,
     updatedAt: t,
+    schemaVersion: 3,
     tabs: [noteId],
+    tabUsedAt: { [noteId]: t },
     activeNoteId: noteId,
     settings: { inputMode: 'touch', prediction: false },
     toolState: null,

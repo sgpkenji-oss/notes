@@ -2,6 +2,8 @@
 // 7種類のデータ（フォルダ・ノート・ページ・線・付箋・コネクタ・グループ枠）とアプリの状態を持つ。
 // 第3段階以降で使う入れ物も最初から作っておく。
 
+export const STORE_NAMES = ['folders', 'notes', 'pages', 'strokes', 'stickies', 'connectors', 'frames', 'appState'];
+
 const DB_NAME = 'handwritten-notes';
 const DB_VERSION = 1;
 
@@ -95,6 +97,40 @@ export async function writeBatch(ops) {
     const os = tx.objectStore(op.store);
     if ('put' in op) os.put(op.put);
     else os.delete(op.delete);
+  }
+  return done(tx);
+}
+
+export async function getAll(store) {
+  const db = await openDB();
+  return request(db.transaction(store).objectStore(store).getAll());
+}
+
+// 索引で絞った、主キーの一覧（消すときに使う）
+export async function getKeysByIndex(store, index, key) {
+  const db = await openDB();
+  return request(db.transaction(store).objectStore(store).index(index).getAllKeys(key));
+}
+
+// 全データを1つのまとまりで読む（バックアップの書き出し用。途中で書き換わらないよう1つの読み取りで行う）
+export async function dumpAll() {
+  const db = await openDB();
+  const tx = db.transaction(STORE_NAMES);
+  const reqs = STORE_NAMES.map((name) => request(tx.objectStore(name).getAll()));
+  const lists = await Promise.all(reqs);
+  const out = {};
+  STORE_NAMES.forEach((name, i) => { out[name] = lists[i]; });
+  return out;
+}
+
+// 全データを入れ替える（バックアップの読み込み用）。全部成功するか、全部取り消される
+export async function replaceAll(data) {
+  const db = await openDB();
+  const tx = db.transaction(STORE_NAMES, 'readwrite');
+  for (const name of STORE_NAMES) {
+    const os = tx.objectStore(name);
+    os.clear();
+    for (const v of data[name] || []) os.put(v);
   }
   return done(tx);
 }

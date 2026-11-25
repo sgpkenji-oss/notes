@@ -17,6 +17,15 @@
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
+  <!-- タブの帯（ライブラリボタン＋開いているノート） -->
+  <header id="tabbar">
+    <button type="button" id="library-button" class="library-button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      <span>ライブラリ</span>
+    </button>
+    <div id="tabs" role="tablist"></div>
+  </header>
+
   <!-- 道具の帯 -->
   <header id="toolbar">
     <div class="group" id="tool-group"></div>
@@ -29,6 +38,18 @@
     <div class="spacer"></div>
     <button type="button" id="add-page-button" class="text-button">＋ ページ</button>
   </header>
+
+  <!-- バックアップのお知らせ（最後のバックアップから7日たったとき） -->
+  <div id="backup-banner" hidden>
+    <div>
+      <strong>バックアップしましょう。</strong>
+      <span id="backup-banner-text"></span>
+    </div>
+    <div class="banner-buttons">
+      <button type="button" id="backup-banner-go" class="primary">バックアップする</button>
+      <button type="button" id="backup-banner-later">あとで</button>
+    </div>
+  </div>
 
   <!-- ホーム画面に追加していないときの案内 -->
   <div id="install-banner" hidden>
@@ -46,8 +67,24 @@
     <canvas id="ink-canvas"></canvas>
   </main>
 
-  <div id="page-indicator">1 / 1</div>
+  <!-- なげなわの操作の帯（#stage の中に入れると、押した操作が「書き始め」になってしまうので外に置く） -->
+  <div id="lasso-bar" hidden>
+    <button type="button" data-act="copy">コピー</button>
+    <button type="button" data-act="paste">貼り付け</button>
+    <button type="button" data-act="delete" class="danger-text">削除</button>
+    <span class="lasso-colors" aria-label="色を変える"></span>
+  </div>
+
+  <div id="page-indicator">
+    <span id="page-number">1 / 1</span>
+    <button type="button" id="page-list-button">ページ一覧</button>
+  </div>
   <div id="add-page-menu" hidden></div>
+  <!-- ライブラリ・ページ一覧・設定（ノート画面から開き、閉じるとノート画面に戻る） -->
+  <section id="library" class="screen" hidden></section>
+  <section id="page-list" class="screen" hidden></section>
+  <section id="settings" class="screen" hidden></section>
+  <div id="dialog-root"></div>
   <div id="toast" role="status"></div>
   <div id="fatal" hidden></div>
 
