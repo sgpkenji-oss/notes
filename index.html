@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>ノート</title>
 
   <!-- ホーム画面に追加したとき、アプリのように全画面で開く設定 -->
@@ -14,22 +14,43 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="icon" type="image/png" href="icons/icon-192.png">
-
-  <style>
-    html, body { height: 100%; margin: 0; }
-    body {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #fff;
-      color: #333;
-      font-family: -apple-system, "Hiragino Sans", sans-serif;
-      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-    }
-    h1 { font-size: 2rem; font-weight: 600; }
-  </style>
+  <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
-  <h1>手書きノート 準備中</h1>
+  <!-- 道具の帯 -->
+  <header id="toolbar">
+    <div class="group" id="tool-group"></div>
+    <div class="sep"></div>
+    <div class="group" id="color-group"></div>
+    <div class="sep"></div>
+    <div class="group" id="size-group"></div>
+    <div class="sep"></div>
+    <div class="group" id="history-group"></div>
+    <div class="spacer"></div>
+    <button type="button" id="add-page-button" class="text-button">＋ ページ</button>
+  </header>
+
+  <!-- ホーム画面に追加していないときの案内 -->
+  <div id="install-banner" hidden>
+    <div>
+      <strong>ホーム画面に追加して使ってください。</strong>
+      Safariで開いたままだと、しばらく使わないうちに書いたノートが消されることがあります。
+      共有ボタン（四角から上向きの矢印）→「ホーム画面に追加」を選び、ホーム画面のアイコンから開いてください。
+    </div>
+    <button type="button">閉じる</button>
+  </div>
+
+  <!-- ノート（下：確定した線、上：書いている途中の線） -->
+  <main id="stage">
+    <canvas id="base-canvas"></canvas>
+    <canvas id="ink-canvas"></canvas>
+  </main>
+
+  <div id="page-indicator">1 / 1</div>
+  <div id="add-page-menu" hidden></div>
+  <div id="toast" role="status"></div>
+  <div id="fatal" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
